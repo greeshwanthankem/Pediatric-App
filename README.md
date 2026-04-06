@@ -6,7 +6,7 @@ A deep learning-based web application that detects **pediatric bone fractures** 
 
 ## 🚀 Live Demo
 
-https://pediatric-fracture-detection.streamlit.app
+https://pediatric-wrist-fracture-detection.streamlit.app/
 
 ---
 
