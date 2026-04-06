@@ -1,11 +1,9 @@
 from pathlib import Path
 import traceback
-import os
 
 import pandas as pd
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
-from huggingface_hub import hf_hub_download
 
 from inference import load_model, run_inference, prepare_display_image
 from utils import (
@@ -15,24 +13,18 @@ from utils import (
     get_display_class_name,
 )
 
-# ------------------ MODEL DOWNLOAD (HuggingFace) ------------------
-MODEL_PATH = "ourModel.pt"
-
-if not os.path.exists(MODEL_PATH):
-    MODEL_PATH = hf_hub_download(
-        repo_id="greeshwanth/pediatric-fracture-model",
-        filename="ourModel.pt"
-    )
-
-# ------------------ STREAMLIT CONFIG ------------------
 st.set_page_config(page_title="Pediatric Fracture Detection", layout="wide")
 
 st.title("Pediatric Bone Fracture Detection Web App")
 st.write("Upload a pediatric wrist X-ray image to detect possible fracture-related regions.")
 
-# ------------------ SIDEBAR ------------------
 with st.sidebar:
     st.header("Model Settings")
+    weights_path = st.text_input(
+        "Model weights path",
+        value="OurModel.pt",
+        help="Provide the local path to your trained YOLO weights file (.pt).",
+    )
     conf_threshold = st.slider(
         "Confidence threshold",
         min_value=0.0,
@@ -41,7 +33,6 @@ with st.sidebar:
         step=0.05,
     )
 
-# ------------------ FILE UPLOAD ------------------
 uploaded_file = st.file_uploader(
     "Upload an X-ray image",
     type=["jpg", "jpeg", "png"],
@@ -53,23 +44,23 @@ if uploaded_file is None:
     st.stop()
 
 
-# ------------------ ERROR HANDLER ------------------
 def show_streamlit_exception(title: str, exc: Exception) -> None:
     st.error(f"{title}: {exc}")
     st.exception(exc)
     traceback.print_exc()
 
 
-# ------------------ IMAGE PROCESSING ------------------
 left_col, right_col = st.columns(2)
 
 try:
+    # Do NOT force convert("RGB") here
     original_image = Image.open(uploaded_file)
 except (UnidentifiedImageError, OSError, ValueError) as exc:
     show_streamlit_exception("Invalid image file", exc)
     st.stop()
 
 try:
+    # Use normalized/prepared version for display and drawing
     display_image = prepare_display_image(original_image)
 except Exception as exc:
     show_streamlit_exception("Failed to prepare image for display", exc)
@@ -77,10 +68,7 @@ except Exception as exc:
 
 with left_col:
     st.subheader("Original Image")
-    st.image(display_image, use_container_width=True)
-
-# Ensure outputs folder exists
-os.makedirs("outputs", exist_ok=True)
+    st.image(display_image, width="stretch")
 
 try:
     saved_image_path = save_uploaded_file(uploaded_file, "outputs")
@@ -88,10 +76,19 @@ try:
 except Exception as exc:
     st.warning(f"Image could not be saved to disk: {exc}")
 
-# ------------------ MODEL INFERENCE ------------------
+weights_path = weights_path.strip()
+if not weights_path:
+    st.error("Model weights path is empty. Please provide a valid .pt file path in the sidebar.")
+    st.stop()
+
+weights_file = Path(weights_path)
+if not weights_file.exists() or not weights_file.is_file():
+    st.error(f"Weights file not found: {weights_file.resolve()}")
+    st.stop()
+
 with st.spinner("Loading model and running inference..."):
     try:
-        model = load_model(MODEL_PATH)
+        model = load_model(str(weights_file))
     except Exception as exc:
         show_streamlit_exception("Model loading failed", exc)
         st.stop()
@@ -102,7 +99,6 @@ with st.spinner("Loading model and running inference..."):
         show_streamlit_exception("Inference failed", exc)
         st.stop()
 
-# ------------------ DRAW RESULTS ------------------
 try:
     annotated_image = draw_detections(display_image, detections)
 except Exception as exc:
@@ -113,9 +109,8 @@ summary = generate_summary(detections)
 
 with right_col:
     st.subheader("Annotated Result")
-    st.image(annotated_image, use_container_width=True)
+    st.image(annotated_image, width="stretch")
 
-# ------------------ SUMMARY ------------------
 st.subheader("Detection Summary")
 st.write(
     {
@@ -126,7 +121,6 @@ st.write(
     }
 )
 
-# ------------------ TABLE ------------------
 st.subheader("Detections Table")
 if detections:
     table_rows = [
@@ -137,6 +131,6 @@ if detections:
         }
         for det in detections
     ]
-    st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
+    st.dataframe(pd.DataFrame(table_rows), width="stretch")
 else:
     st.info("No detections found for the selected confidence threshold.")
